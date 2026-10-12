@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
-import { createServer, get } from 'node:http';
+import { get } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 
@@ -12,15 +12,12 @@ const expectedBuilder = `components:
     role: web
     platform: nodejs
     platformVersion: "24"
-    path: /
     run:
-      port: 8080
       start: node server.mjs
       healthCheckPath: /health
-      healthCheckStatusCodes: [200]
 `;
 
-test('root manifests preserve the Node.js 24 dependency-free startup contract', async () => {
+test('root manifests preserve the Node.js 24 startup contract with single-component defaults', async () => {
   const packageJson = JSON.parse(await readFile(new URL('package.json', root), 'utf8'));
   const lock = JSON.parse(await readFile(new URL('package-lock.json', root), 'utf8'));
   assert.equal(packageJson.private, true);
@@ -43,9 +40,23 @@ test('root manifests preserve the Node.js 24 dependency-free startup contract', 
   assert.equal(await readFile(new URL('builder.yaml', root), 'utf8'), expectedBuilder);
 });
 
-function request(path) {
+// Assert the app's default binding, but use an OS-assigned port only in tests.
+const testStartup = `
+import assert from 'node:assert/strict';
+import { Server } from 'node:http';
+const listen = Server.prototype.listen;
+Server.prototype.listen = function (port, host) {
+  assert.equal(port, 8080);
+  assert.equal(host, '0.0.0.0');
+  this.once('listening', () => process.send(this.address().port));
+  return listen.call(this, 0, host);
+};
+await import('./server.mjs');
+`;
+
+function request(port, path) {
   return new Promise((resolve, reject) => {
-    const req = get(`http://127.0.0.1:8080${path}`, (response) => {
+    const req = get(`http://127.0.0.1:${port}${path}`, (response) => {
       let body = '';
       response.setEncoding('utf8');
       response.on('data', (chunk) => { body += chunk; });
@@ -61,20 +72,11 @@ function request(path) {
   });
 }
 
-async function assertPortAvailable() {
-  const probe = createServer();
-  probe.listen(8080, '0.0.0.0');
-  await once(probe, 'listening');
-  await new Promise((resolve, reject) => {
-    probe.close((error) => error ? reject(error) : resolve());
-  });
-}
-
-async function waitForServer(child, getStderr) {
+async function waitForServer(child, port, getStderr) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     assert.equal(child.exitCode, null, `Server exited: ${getStderr()}`);
     try {
-      await request('/health');
+      await request(port, '/health');
       return;
     } catch (error) {
       if (error.code !== 'ECONNREFUSED') throw error;
@@ -87,32 +89,41 @@ async function waitForServer(child, getStderr) {
 test('HTTP routes and public greeting work with no external services', { timeout: 30000 }, async (t) => {
   for (const greeting of [undefined, 'Welcome', '']) {
     await t.test(`SAMPLE_GREETING=${greeting === undefined ? '(unset)' : JSON.stringify(greeting)}`, async () => {
-      await assertPortAvailable();
       const env = { ...process.env };
       delete env.SAMPLE_GREETING;
       if (greeting !== undefined) env.SAMPLE_GREETING = greeting;
-      const child = spawn(process.execPath, ['server.mjs'], {
+      const child = spawn(process.execPath, ['--input-type=module', '--eval', testStartup], {
         cwd: root,
         env,
-        stdio: ['ignore', 'ignore', 'pipe'],
+        stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
       });
       let stderr = '';
       child.stderr.setEncoding('utf8');
       child.stderr.on('data', (chunk) => { stderr += chunk; });
       const exited = once(child, 'exit');
       try {
-        await waitForServer(child, () => stderr);
-        assert.deepEqual(await request('/'), {
+        const port = await Promise.race([
+          once(child, 'message').then(([port]) => port),
+          exited.then(([code, signal]) => {
+            throw new Error(`Server exited before listening (${code ?? signal}): ${stderr}`);
+          }),
+          delay(5000, undefined, { ref: false }).then(() => {
+            throw new Error(`Server did not start listening: ${stderr}`);
+          }),
+        ]);
+        assert.equal(Number.isInteger(port) && port > 0 && port <= 65535, true);
+        await waitForServer(child, port, () => stderr);
+        assert.deepEqual(await request(port, '/'), {
           status: 200,
           type: 'text/plain; charset=utf-8',
           body: `App Service Builder / nodejs-web: ${greeting || 'Hello'}\n`,
         });
-        assert.deepEqual(await request('/health'), {
+        assert.deepEqual(await request(port, '/health'), {
           status: 200,
           type: 'text/plain; charset=utf-8',
           body: 'OK\n',
         });
-        assert.deepEqual(await request('/not-found'), {
+        assert.deepEqual(await request(port, '/not-found'), {
           status: 404,
           type: 'text/plain; charset=utf-8',
           body: 'Not found\n',

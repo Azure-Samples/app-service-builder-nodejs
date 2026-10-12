@@ -3,9 +3,6 @@ components:
     role: web
     platform: nodejs
     platformVersion: "24"
-    path: /
     run:
-      port: 8080
       start: node server.mjs
       healthCheckPath: /health
-      healthCheckStatusCodes: [200]
