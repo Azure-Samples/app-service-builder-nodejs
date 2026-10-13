@@ -35,7 +35,8 @@ node server.mjs
 
 The lockfile records an empty dependency graph; `npm ci` installs no third-party
 packages. The checks use Node's built-in test runner and start and stop their own
-server. Leave the final command running and use a second terminal:
+server on OS-assigned ports, without using port 8080. Leave the final command
+running and use a second terminal:
 
 ```sh
 curl -i http://localhost:8080/
@@ -86,10 +87,10 @@ trying again; a local pass does not qualify the cloud runtime.
 ### Build and startup contract
 
 `builder.yaml` declares one web component using platform `nodejs`, version
-`"24"`, component path `/`, port `8080`, and startup command `node server.mjs`.
-The health check is `/health` with exact status `200`. There is no custom build
-or `output` field. Keep the package and lockfile together, and retain the Node.js
-24 engine requirement.
+`"24"`, startup command `node server.mjs`, and health check path `/health`.
+It omits the single-component defaults: root mount `/`, port `8080`, and
+exact health status `200`. There is no custom build or `output` field. Keep
+the package and lockfile together, and retain the Node.js 24 engine requirement.
 
 The platform's compute build prepares the runnable app; the startup command is
 relative to the selected app root. See
