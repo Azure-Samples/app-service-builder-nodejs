@@ -44,11 +44,20 @@ curl -i http://localhost:8080/health
 curl -i http://localhost:8080/not-found
 ```
 
+Open `http://localhost:8080/demo` in a browser for the visual Node.js showcase.
+It displays the same public greeting with a responsive ink-and-lime layout,
+runtime details, real endpoint links, and keyboard-accessible expandable
+instructions. It uses inline CSS, system fonts, and no JavaScript or external
+assets. The original endpoints are unchanged; there is no content negotiation.
+
 | Path | Status | Plain-text body |
 | --- | --- | --- |
 | `/` | 200 | `App Service Builder / nodejs-web: Hello` |
 | `/health` | 200 | `OK` |
 | Any unknown path | 404 | `Not found` |
+
+`/demo` returns HTTP **200** with `text/html; charset=utf-8`, not plain text.
+Use `/demo` for template thumbnails and `/health` for health checks.
 
 Responses end with a newline. Stop the server with **Ctrl+C** before running
 tests again or starting another instance.
@@ -68,7 +77,7 @@ the source configuration, not a live-verified cloud deployment.
    Portal; do not paste tokens or credentials into source files.
 3. Select `<your-github-account>/app-service-builder-nodejs`, branch **`main`**,
    and the **repository root** as the app source. `builder.yaml`, `package.json`,
-   `package-lock.json`, and `server.mjs` must all be at that root; do not select
+   `package-lock.json`, `server.mjs`, and `demo.mjs` must all be at that root; do not select
    `samples/nodejs-web` or another subdirectory.
 4. Start deployment and wait until Portal reports successful completion. A saved
    source connection alone does not establish that the app is running.
@@ -111,6 +120,9 @@ SAMPLE_GREETING="Welcome" node server.mjs
 In a second terminal, `curl -i http://localhost:8080/` should return
 `App Service Builder / nodejs-web: Welcome`. `/health` remains `OK`. Stop the
 server with **Ctrl+C**.
+
+The `/demo` page displays that same greeting, HTML-escaped as text. It never
+reflects any other environment variables.
 
 For a deployed app, add `SAMPLE_GREETING` in Portal **Variables**.
 **Save only** persists desired values without changing the running version;

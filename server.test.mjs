@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { get } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
+import { renderDemo } from './demo.mjs';
 
 const root = new URL('./', import.meta.url);
 const expectedBuilder = `components:
@@ -54,9 +55,9 @@ Server.prototype.listen = function (port, host) {
 await import('./server.mjs');
 `;
 
-function request(port, path) {
+function request(port, path, headers = {}) {
   return new Promise((resolve, reject) => {
-    const req = get(`http://127.0.0.1:${port}${path}`, (response) => {
+    const req = get(`http://127.0.0.1:${port}${path}`, { headers }, (response) => {
       let body = '';
       response.setEncoding('utf8');
       response.on('data', (chunk) => { body += chunk; });
@@ -87,9 +88,10 @@ async function waitForServer(child, port, getStderr) {
 }
 
 test('HTTP routes and public greeting work with no external services', { timeout: 30000 }, async (t) => {
-  for (const greeting of [undefined, 'Welcome', '']) {
+  for (const greeting of [undefined, 'Welcome', '', '<script>alert("x")</script> & \'hello\'', 'A'.repeat(500)]) {
     await t.test(`SAMPLE_GREETING=${greeting === undefined ? '(unset)' : JSON.stringify(greeting)}`, async () => {
       const env = { ...process.env };
+      env.PRIVATE_TEST_VALUE = 'must-not-appear-in-demo';
       delete env.SAMPLE_GREETING;
       if (greeting !== undefined) env.SAMPLE_GREETING = greeting;
       const child = spawn(process.execPath, ['--input-type=module', '--eval', testStartup], {
@@ -118,11 +120,25 @@ test('HTTP routes and public greeting work with no external services', { timeout
           type: 'text/plain; charset=utf-8',
           body: `App Service Builder / nodejs-web: ${greeting || 'Hello'}\n`,
         });
+        assert.deepEqual(await request(port, '/', { Accept: 'text/html' }), {
+          status: 200,
+          type: 'text/plain; charset=utf-8',
+          body: `App Service Builder / nodejs-web: ${greeting || 'Hello'}\n`,
+        });
+        const demo = await request(port, '/demo');
+        assert.equal(demo.status, 200);
+        assert.equal(demo.type, 'text/html; charset=utf-8');
+        assert.equal(demo.body, renderDemo(greeting || 'Hello'));
+        assert.ok(!demo.body.includes(env.PRIVATE_TEST_VALUE));
+        assert.match(demo.body, /<html lang="en">/);
+        assert.match(demo.body, /name="viewport"/);
+        assert.match(demo.body, /href="\/health"/);
         assert.deepEqual(await request(port, '/health'), {
           status: 200,
           type: 'text/plain; charset=utf-8',
           body: 'OK\n',
         });
+
         assert.deepEqual(await request(port, '/not-found'), {
           status: 404,
           type: 'text/plain; charset=utf-8',
@@ -134,4 +150,11 @@ test('HTTP routes and public greeting work with no external services', { timeout
       }
     });
   }
+});
+
+test('demo renders public greeting only as escaped text', () => {
+  const html = renderDemo('<script>alert("x")</script> & \'hello\'');
+  assert.ok(html.includes('&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &#39;hello&#39;'));
+  assert.ok(!html.includes('<script>'));
+  assert.ok(!html.includes('<script src='));
 });

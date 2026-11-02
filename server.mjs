@@ -1,10 +1,14 @@
 import { createServer } from 'node:http';
+import { renderDemo } from './demo.mjs';
 
 createServer((request, response) => {
   const path = new URL(request.url, 'http://localhost').pathname;
   response.setHeader('Content-Type', 'text/plain; charset=utf-8');
   if (path === '/health') {
     response.writeHead(200).end('OK\n');
+  } else if (path === '/demo') {
+    response.setHeader('Content-Type', 'text/html; charset=utf-8');
+    response.writeHead(200).end(renderDemo(process.env.SAMPLE_GREETING || 'Hello'));
   } else if (path === '/') {
     // Only this deliberately public setting is reflected; never dump process.env.
     response.writeHead(200).end(
